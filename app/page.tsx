@@ -23,10 +23,11 @@ import {
   Truck,
   X,
 } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Product = {
   id: string;
+  slug: string;
   name: string;
   shortName: string;
   brand: string;
@@ -41,6 +42,7 @@ type Product = {
 const products: Product[] = [
   {
     id: "8008843010424",
+    slug: "normolip-5-60-naturcaps-per-il-colesterolo-3772",
     name: "Normolip 5 · 60 Naturcaps",
     shortName: "Normolip 5",
     brand: "ESI",
@@ -52,7 +54,8 @@ const products: Product[] = [
     badge: "Più scelto",
   },
   {
-    id: "8006290804337-24",
+    id: "8006290804337 - 24 Bottiglie",
+    slug: "fonte-essenziale-400ml-acqua-termale-24-bottiglie-da-400ml-10975",
     name: "Fonte Essenziale · 24 bottiglie",
     shortName: "Fonte Essenziale",
     brand: "Fonte Essenziale",
@@ -66,6 +69,7 @@ const products: Product[] = [
   },
   {
     id: "4897091050559",
+    slug: "swisse-beauty-capelli-pelle-unghie-60-compresse-4065",
     name: "Swisse Beauty · Capelli Pelle Unghie",
     shortName: "Swisse Beauty",
     brand: "Swisse",
@@ -79,6 +83,7 @@ const products: Product[] = [
   },
   {
     id: "8050444858646",
+    slug: "rilastil-aqua-30ml-intense-gel-serum-idratante-intensivo-15216",
     name: "Rilastil Aqua · Intense Gel Serum",
     shortName: "Rilastil Aqua",
     brand: "Rilastil",
@@ -92,6 +97,7 @@ const products: Product[] = [
   },
   {
     id: "8059591192238",
+    slug: "helidermina-crema-viso-50ml-antiage-active-plus-4725",
     name: "Helidermina · Crema viso Antiage",
     shortName: "Helidermina Antiage",
     brand: "Helidermina",
@@ -105,6 +111,8 @@ const products: Product[] = [
   },
   {
     id: "8055510240387",
+    slug:
+      "rilastil-hydrotenseur-crema-antirughe-40ml-ricca-ristrutturante-15276",
     name: "Rilastil Hydrotenseur · Crema antirughe",
     shortName: "Rilastil Hydrotenseur",
     brand: "Rilastil",
@@ -142,6 +150,15 @@ export default function Home() {
   const [payment, setPayment] = useState<"stripe" | "cod" | "bank">("stripe");
   const [orderSent, setOrderSent] = useState(false);
   const [notice, setNotice] = useState("");
+  const [processing, setProcessing] = useState(false);
+  const [checkoutMessage, setCheckoutMessage] = useState("");
+
+  useEffect(() => {
+    const stored = JSON.parse(
+      window.localStorage.getItem("nowpharma-cart") || "{}",
+    ) as Record<string, number>;
+    setCart(stored);
+  }, []);
 
   const filteredProducts = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -171,10 +188,14 @@ export default function Home() {
   const freeShippingLeft = Math.max(0, 39.9 - subtotal);
 
   function addToCart(product: Product) {
-    setCart((current) => ({
-      ...current,
-      [product.id]: (current[product.id] || 0) + 1,
-    }));
+    setCart((current) => {
+      const updated = {
+        ...current,
+        [product.id]: (current[product.id] || 0) + 1,
+      };
+      window.localStorage.setItem("nowpharma-cart", JSON.stringify(updated));
+      return updated;
+    });
     setNotice(`${product.shortName} aggiunto al carrello`);
     window.setTimeout(() => setNotice(""), 2200);
   }
@@ -184,6 +205,7 @@ export default function Home() {
       const next = Math.max(0, (current[id] || 0) + delta);
       const updated = { ...current, [id]: next };
       if (!next) delete updated[id];
+      window.localStorage.setItem("nowpharma-cart", JSON.stringify(updated));
       return updated;
     });
   }
@@ -193,8 +215,42 @@ export default function Home() {
     document.getElementById("prodotti")?.scrollIntoView({ behavior: "smooth" });
   }
 
-  function submitOrder(event: FormEvent<HTMLFormElement>) {
+  async function submitOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setCheckoutMessage("");
+    if (payment === "stripe") {
+      setProcessing(true);
+      try {
+        const response = await fetch("/api/stripe-checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: cartItems.map((item) => ({
+              id: item.id,
+              quantity: item.quantity,
+            })),
+          }),
+        });
+        const result = (await response.json()) as {
+          url?: string;
+          message?: string;
+        };
+        if (result.url) {
+          window.location.assign(result.url);
+          return;
+        }
+        setCheckoutMessage(
+          result.message || "Il pagamento Stripe non è ancora disponibile.",
+        );
+      } catch {
+        setCheckoutMessage(
+          "Non è stato possibile collegarsi a Stripe. Riprova tra poco.",
+        );
+      } finally {
+        setProcessing(false);
+      }
+      return;
+    }
     setOrderSent(true);
   }
 
@@ -263,7 +319,7 @@ export default function Home() {
 
         <nav className={`main-nav ${mobileOpen ? "is-open" : ""}`}>
           <div className="shell nav-inner">
-            <a href="#categorie">
+            <a href="/catalogo">
               Categorie <ChevronDown size={15} aria-hidden="true" />
             </a>
             <a href="#prodotti">Offerte</a>
@@ -354,7 +410,7 @@ export default function Home() {
             <p>Offerte fino al</p>
             <strong>−33%</strong>
           </div>
-          <a href="#prodotti">
+          <a href="/catalogo">
             Scopri la selezione <ArrowRight size={18} aria-hidden="true" />
           </a>
         </div>
@@ -375,17 +431,10 @@ export default function Home() {
         </div>
         <div className="category-grid">
           {categories.map((category) => (
-            <button
+            <a
               key={category.number}
-              className={`category-card ${
-                activeCategory === category.label ? "is-active" : ""
-              }`}
-              onClick={() => {
-                setActiveCategory(category.label);
-                document
-                  .getElementById("prodotti")
-                  ?.scrollIntoView({ behavior: "smooth" });
-              }}
+              className="category-card"
+              href="/catalogo"
             >
               <span>{category.number}</span>
               <div>
@@ -393,7 +442,7 @@ export default function Home() {
                 <small>{category.detail}</small>
               </div>
               <ArrowRight size={17} aria-hidden="true" />
-            </button>
+            </a>
           ))}
         </div>
       </section>
@@ -448,7 +497,9 @@ export default function Home() {
                       <p>
                         {product.brand} · {product.category}
                       </p>
-                      <h3>{product.name}</h3>
+                      <h3>
+                        <a href={`/prodotto/${product.slug}`}>{product.name}</a>
+                      </h3>
                       <span className="need-label">{product.need}</span>
                       <div className="rating" aria-label="Valutazione 4,8 su 5">
                         {[1, 2, 3, 4, 5].map((star) => (
@@ -562,7 +613,7 @@ export default function Home() {
           </div>
           <div>
             <h3>Esplora</h3>
-            <a href="#categorie">Categorie</a>
+            <a href="/catalogo">Categorie</a>
             <a href="#prodotti">Offerte</a>
             <a href="#marche">Marche</a>
             <a href="#consigli">Consigli</a>
@@ -750,11 +801,32 @@ export default function Home() {
                 <div>
                   <Check size={28} />
                 </div>
-                <h3>Richiesta ricevuta</h3>
-                <p>
-                  Questa anteprima è pronta per essere collegata alla gestione
-                  ordini e alle chiavi Stripe.
-                </p>
+                <h3>
+                  {payment === "bank"
+                    ? "Ordine registrato: completa il bonifico"
+                    : "Richiesta d’ordine ricevuta"}
+                </h3>
+                {payment === "bank" ? (
+                  <div className="bank-instructions">
+                    <p>
+                      <strong>Beneficiario</strong>
+                      VIPHARMA DI TATULLI VITO &amp; CO. S.A.S.
+                    </p>
+                    <p>
+                      <strong>IBAN</strong>
+                      IT79E0306941384100000009837
+                    </p>
+                    <small>
+                      Inserisci il numero d’ordine nella causale. La spedizione
+                      partirà dopo l’accredito.
+                    </small>
+                  </div>
+                ) : (
+                  <p>
+                    Il pagamento in contrassegno include il supplemento di €5,00.
+                    Riceverai la conferma con i dati della spedizione.
+                  </p>
+                )}
                 <button
                   className="primary-button"
                   onClick={() => {
@@ -845,8 +917,18 @@ export default function Home() {
                     <b>{money.format(total)}</b>
                   </p>
                 </div>
-                <button className="primary-button full-button" type="submit">
-                  Conferma e continua <ArrowRight size={18} />
+                {checkoutMessage && (
+                  <p className="checkout-message" role="alert">
+                    {checkoutMessage}
+                  </p>
+                )}
+                <button
+                  className="primary-button full-button"
+                  type="submit"
+                  disabled={processing}
+                >
+                  {processing ? "Collegamento sicuro…" : "Conferma e continua"}{" "}
+                  {!processing && <ArrowRight size={18} />}
                 </button>
               </form>
             )}
